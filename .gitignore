@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Raw live-game events include other players' summoner names.
+LIVE_*_events.json
+
+# Your own captured games and the training data.
+lol_snapshots.csv
+lol_10min_all.csv
+lol_10min_silver.csv
+lol_15min_all.csv
+
+# Original sprite source; assets/gem.png is the copy the overlay uses.
+LOL UI upgrade 1.png

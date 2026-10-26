@@ -1,0 +1,7 @@
+requests
+urllib3
+pillow
+# Only needed to re-run the notebook:
+numpy
+pandas
+matplotlib
