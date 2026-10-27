@@ -24,6 +24,33 @@ py lol_overlay.py --rank GOLD
 The overlay also saves a snapshot of each game to `lol_snapshots.csv`, so don't run it
 alongside `lol_snapshots.py`.
 
+## Next-item box
+
+A framed item icon under the gem shows what to buy. It pops up for 45 seconds:
+
+- at the start of the game, with your champion's starting item;
+- each time you buy a build item (starter, boots or a finished item), showing the next item
+  in your build, so you can buy it in parts;
+- when you can afford the whole next item, as a reminder to buy it.
+
+It knows your champion, role, items and gold from the live game, and the build comes from
+`data/builds.json`.
+
+Builds are learned from Emerald+ ranked games, one slot at a time (boots, then the 1st
+completed item, the 2nd, and so on to the 6th). Each item is only compared with the other
+choices for that same slot. Late items win more simply because winning players can afford
+them, so ranking across the whole game would favour expensive items from minute one.
+
+To make or refresh the data (needs a Riot API key in a `.env` file: `RIOT_API_KEY=RGAPI-...`;
+a 24-hour development key is enough):
+
+```
+py build_data.py --region na1 --matches 3000
+```
+
+It's resumable, and `--aggregate-only` rebuilds `builds.json` from games already collected.
+Re-run it after each patch. Without `data/builds.json` the overlay runs without the item box.
+
 ## Terminal version
 
 ```
@@ -37,6 +64,9 @@ Same polling and snapshots, but prints the win chance instead of showing the ove
 | File | What it is |
 |---|---|
 | `lol_overlay.py` | Always-on-top, click-through overlay (Tkinter + Pillow) |
+| `lol_itembox.py` | Next-item suggestions, and the pixelated icon drawn inside `assets/item_frame.png` |
+| `lol_items.py` | Item recipes, costs and icons from Riot's Data Dragon; shopping logic |
+| `build_data.py` | Collects ranked games via Riot's API and learns builds into `data/builds.json` |
 | `lol_snapshots.py` | Polls Riot's Live Client Data API, takes snapshots, runs the model |
 | `win_model.json` | Coefficients for the 10 and 15 minute models |
 | `lol_eda_10_vs_15.ipynb` | Exploration, cross-validation and model export |

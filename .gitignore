@@ -13,3 +13,11 @@ lol_15min_all.csv
 
 # Original sprite source; assets/gem.png is the copy the overlay uses.
 LOL UI upgrade 1.png
+
+# API key and downloaded/cached data (data/builds.json is the one output worth committing).
+.env
+data/raw/
+data/ddragon/
+
+# Original frame source; assets/item_frame.png is the copy the overlay uses.
+LOL item ui upgrade 1.png

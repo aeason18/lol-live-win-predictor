@@ -30,6 +30,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 
 import lol_snapshots as ls
+from lol_itembox import ItemAdvisor, demo_rec, draw_item_box, item_size
 
 # Win32 constants
 GWL_EXSTYLE = -20
@@ -54,7 +55,9 @@ WHITE, SHADOW = (255, 255, 255), (0, 45, 22)
 BAR_DARK = (0, 55, 26)
 BLUE_PX = {"hi": (150, 205, 255), "mid": (66, 140, 235), "lo": (36, 88, 175)}
 RED_PX = {"hi": (255, 150, 135), "mid": (222, 72, 66), "lo": (150, 40, 46)}
-SHOW_SECONDS = 45  # how long the box stays up after each read
+SHOW_SECONDS = 45  # how long the gem stays up after each read
+ITEM_SHOW_SECONDS = 45  # how long the item box stays up after it pops
+ITEM_GAP = 2  # art pixels between the gem and the item box
 ALPHA = 1.0  # the art is opaque; lower this to let the game show through
 
 
@@ -70,6 +73,8 @@ class State:
         self.delta = None  # my-team change vs the earlier read, in points
         self.read_id = 0  # bumped on every new read so the overlay knows to pop up
         self.my_side = None  # "blue" / "red" / None
+        self.item = None  # lol_itembox.Rec: the next purchase, or None
+        self.item_id = 0  # bumped when the item box should pop up
         self.done = False
         self.stop = threading.Event()
 
@@ -81,6 +86,12 @@ def poll(state, rank):
     match_id = time.strftime("LIVE_%Y%m%d_%H%M%S")
     pending, rows, result, all_events, earlier = list(ls.MARKS), [], None, [], None
     in_game = False
+    try:
+        advisor = ItemAdvisor()
+        print(f"Item box on (builds for patch {advisor.builds['patch']}, item data {advisor.catalog.version}).")
+    except Exception as exc:  # the win-chance gem works without the item box
+        advisor = None
+        print(f"Item box off: {exc}")
     print("Waiting for a live game (start one; League must be in-game, not in lobby/loading)...")
     try:
         while not state.stop.is_set():
@@ -103,6 +114,17 @@ def poll(state, rank):
                 state.my_side = {"ORDER": "blue", "CHAOS": "red"}.get(team)
                 if state.blue is None:
                     state.status = "Next read at 10:00"
+            if advisor:
+                try:
+                    rec, pop = advisor.update(data)
+                except Exception as exc:  # never let the item box take down the win predictor
+                    rec, pop = None, False
+                    print(f"Item box error: {exc!r}")
+                with state.lock:
+                    state.item = rec
+                    state.item_id += pop
+                if pop:
+                    print(f"Item box: {rec.name} ({rec.kind}) - {rec.line2}")
             if pending and game_time >= pending[0] * 60:
                 minute = pending.pop(0)
                 rows.append(ls.snapshot(data, minute, match_id, rank))
@@ -133,7 +155,7 @@ def poll(state, rank):
             result = ls.blue_won(data)
             if result is not None:
                 break
-            state.stop.wait(1 if pending else 5)
+            state.stop.wait(1)  # gold changes constantly, so keep polling at 1s all game
     finally:
         for r in rows:
             r["blue_win"] = result
@@ -159,15 +181,18 @@ class Overlay:
 
         root = self.root = tk.Tk()
         root.overrideredirect(True)
-        root.attributes("-topmost", True, "-alpha", 0.0)  # hidden until a read arrives
-        self.seen_read = 0
-        self.show_until = 0.0
-        self.visible = False
+        root.attributes("-topmost", True, "-alpha", ALPHA)
+        # The gem and the item box each pop up on their own timer; anything not showing is
+        # drawn in the see-through key colour, so the window itself never needs hiding.
+        self.seen_read = self.seen_item = 0
+        self.gem_until = self.item_until = 0.0
         self.sprite = Image.open(SPRITE_FILE).convert("RGBA")
         self.font_big = ImageFont.truetype(str(FONT_FILE), 32)
         self.font_small = ImageFont.truetype(str(FONT_FILE), 16)
-        self.drawn = None  # (main, sub, bar split) currently on screen
-        w, h = self.sprite.width * SCALE, self.sprite.height * SCALE
+        self.drawn = None  # what's currently on screen, so we only redraw on change
+        item_w, item_h = item_size()
+        self.canvas_size = (max(self.sprite.width, item_w), self.sprite.height + ITEM_GAP + item_h)
+        w, h = self.canvas_size[0] * SCALE, self.canvas_size[1] * SCALE
         key_hex = "#%02x%02x%02x" % KEY
         root.geometry(f"{w}x{h}+{x}+{y}")
         root.configure(bg=key_hex)
@@ -225,13 +250,16 @@ class Overlay:
             s = self.state
             blue, minute = s.blue, s.minute
             delta, side, read_id = s.delta, s.my_side, s.read_id
+            item, item_id = s.item, s.item_id
+        now = time.monotonic()
         if read_id != self.seen_read:
             self.seen_read = read_id
-            self.show_until = time.monotonic() + SHOW_SECONDS
-        show = self.drag_mode or time.monotonic() < self.show_until
-        if show != self.visible:
-            self.visible = show
-            self.root.attributes("-alpha", ALPHA if show else 0.0)
+            self.gem_until = now + SHOW_SECONDS
+        if item_id != self.seen_item:
+            self.seen_item = item_id
+            self.item_until = now + ITEM_SHOW_SECONDS
+        gem_on = self.drag_mode or now < self.gem_until
+        item_on = self.drag_mode or now < self.item_until
         if blue is None:
             main, lines, frac = "--", ("Drag", "me"), 0.5  # only visible in drag mode
         else:
@@ -239,17 +267,33 @@ class Overlay:
             main, frac = f"{mine:.0%}", blue
             lines = ((side or "blue").capitalize() + (f"{delta:+.0f}" if delta is not None else ""),
                      f"{minute}:00")
-        self._draw(main, lines, frac)
+        self._draw(gem_on, item_on, main, lines, frac, item)
         self.root.after(250, self._tick)
 
-    def _draw(self, main, lines, blue_frac):
-        """Render onto the sprite at its native resolution, then scale up without smoothing."""
+    def _draw(self, gem_on, item_on, main, lines, blue_frac, item):
+        """Render both pieces at the art's native resolution, then scale up without smoothing."""
         x0, y0, x1, y1 = BAR_BOX
         split = round((x1 - x0 - 2) * blue_frac)
-        if self.drawn == (main, lines, split):
+        state = (gem_on, item_on, main, lines, split, item.key() if item else None)
+        if self.drawn == state:
             return
-        self.drawn = (main, lines, split)
+        self.drawn = state
 
+        canvas = Image.new("RGBA", self.canvas_size, (0, 0, 0, 0))
+        if gem_on:
+            canvas.paste(self._render_gem(main, lines, split), (0, 0))
+        if item_on:  # under the gem, flush with its left edge
+            box = draw_item_box(item)
+            canvas.paste(box, (0, self.sprite.height + ITEM_GAP), box)
+
+        flat = Image.new("RGB", canvas.size, KEY)
+        flat.paste(canvas, mask=canvas.getchannel("A"))
+        flat = flat.resize((canvas.width * SCALE, canvas.height * SCALE), Image.NEAREST)
+        self.photo = ImageTk.PhotoImage(flat)  # keep a reference or Tk drops it
+        self.panel.config(image=self.photo)
+
+    def _render_gem(self, main, lines, split):
+        x0, y0, x1, y1 = BAR_BOX
         art = self.sprite.copy()
         d = ImageDraw.Draw(art)
         d.fontmode = "1"  # no anti-aliasing, so glyphs stay on the pixel grid
@@ -269,12 +313,7 @@ class Overlay:
                 d.rectangle((lo, iy0 + 3, hi - 1, iy0 + 3), fill=px["lo"])
         mid = (ix0 + ix1) // 2
         d.rectangle((mid, iy0, mid, iy0 + 3), fill=BAR_DARK)  # 50% tick
-
-        flat = Image.new("RGB", art.size, KEY)
-        flat.paste(art, mask=art.getchannel("A"))
-        flat = flat.resize((art.width * SCALE, art.height * SCALE), Image.NEAREST)
-        self.photo = ImageTk.PhotoImage(flat)  # keep a reference or Tk drops it
-        self.panel.config(image=self.photo)
+        return art
 
     def run(self):
         self.root.mainloop()
@@ -294,7 +333,12 @@ def main():
     if args.demo:
         state.minute, state.blue, state.my_side, state.read_id = args.demo, 0.62, "blue", 1
         state.delta = 4.0 if args.demo == max(ls.MARKS) else None  # only the later read has a change
-        print(f"Demo mode ({args.demo}:00 read): box shows top-left for {SHOW_SECONDS}s. Ctrl+Alt+Q quits.")
+        try:
+            state.item, state.item_id = demo_rec(), 1
+        except Exception as exc:
+            print(f"Demo item box skipped: {exc}")
+        print(f"Demo mode ({args.demo}:00 read): gem for {SHOW_SECONDS}s, item box for {ITEM_SHOW_SECONDS}s. "
+              "Ctrl+Alt+Q quits.")
         worker = threading.Thread(target=lambda: None)
     else:
         worker = threading.Thread(target=poll, args=(state, args.rank.upper()), daemon=False)
