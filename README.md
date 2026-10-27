@@ -8,21 +8,30 @@ The model is a logistic regression trained on 8,167 matches. It only uses things
 can see in game: level, CS, kills, assists, towers, dragons, heralds, void grubs and first
 blood, as team differences. Gold, items and vision are not used.
 
-## Overlay
+## Install and use
 
-```
-py -m pip install -r requirements.txt
-py lol_overlay.py --rank GOLD
-```
+Download `LoLWinOverlay.exe` from the Releases page and run it. That's it: it sits in the
+system tray (right-click the icon) and picks up every game you play. No terminal, no Python.
 
+- Tray menu: **Move the box**, **Start with Windows**, **Quit**.
 - A small gem pops up for 45 seconds after the 10:00 and 15:00 reads, then disappears.
 - Clicks pass through it to the game.
 - League must be in **Borderless** or Windowed mode. Overlays can't draw over exclusive fullscreen.
-- `py lol_overlay.py --demo 15` previews the box with fake data, no game needed.
-- Hotkeys: **Ctrl+Alt+D** toggles drag mode to move the box, **Ctrl+Alt+Q** quits.
+- Hotkeys: **Ctrl+Alt+D** toggles drag mode to move the box (it remembers where you leave it),
+  **Ctrl+Alt+Q** quits.
+- Nothing about your games is saved or uploaded (it only downloads item data and icons from Riot). Messages go to
+  `%LOCALAPPDATA%\LoLWinOverlay\overlay.log`.
 
-The overlay also saves a snapshot of each game to `lol_snapshots.csv`, so don't run it
-alongside `lol_snapshots.py`.
+From source instead:
+
+```
+py -m pip install -r requirements.txt
+py lol_overlay.py
+```
+
+`py lol_overlay.py --demo 15` previews the box with fake data, no game needed.
+`--save-data` appends each game's snapshot to `lol_snapshots.csv`, for retraining the model.
+To build the `.exe` yourself, run `.\build_exe.ps1` (needs `pyinstaller`).
 
 ## Next-item box
 
@@ -54,7 +63,7 @@ Re-run it after each patch. Without `data/builds.json` the overlay runs without 
 ## Terminal version
 
 ```
-py lol_snapshots.py --rank GOLD
+py lol_snapshots.py
 ```
 
 Same polling and snapshots, but prints the win chance instead of showing the overlay.
@@ -64,6 +73,8 @@ Same polling and snapshots, but prints the win chance instead of showing the ove
 | File | What it is |
 |---|---|
 | `lol_overlay.py` | Always-on-top, click-through overlay (Tkinter + Pillow) |
+| `lol_tray.py`, `lol_startup.py`, `paths.py` | Tray icon, start-with-Windows switch, file locations |
+| `build_exe.ps1` | Builds the single-file `.exe` |
 | `lol_itembox.py` | Next-item suggestions, and the pixelated icon drawn inside `assets/item_frame.png` |
 | `lol_items.py` | Item recipes, costs and icons from Riot's Data Dragon; shopping logic |
 | `build_data.py` | Collects ranked games via Riot's API and learns builds into `data/builds.json` |

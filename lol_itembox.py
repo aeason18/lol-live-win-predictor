@@ -13,10 +13,13 @@ from pathlib import Path
 
 from PIL import Image
 
+from paths import RESOURCE_DIR, USER_DIR
 from lol_items import Catalog, next_target, pick_entry
 
-BUILDS_FILE = Path(__file__).with_name("data") / "builds.json"
-FRAME_FILE = Path(__file__).with_name("assets") / "item_frame.png"
+FRAME_FILE = RESOURCE_DIR / "assets" / "item_frame.png"
+# A builds.json in the user's data folder (a downloaded update) wins over the bundled one.
+BUILDS_FILE = next((p for p in (USER_DIR / "data" / "builds.json", RESOURCE_DIR / "data" / "builds.json")
+                    if p.exists()), RESOURCE_DIR / "data" / "builds.json")
 
 POP_COOLDOWN = 90  # seconds before "you can afford it" can pop up again for the same item
 NO_POP_BEFORE = 90  # game seconds; "you can afford it" never pops before this

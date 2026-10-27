@@ -28,11 +28,13 @@ from pathlib import Path
 import requests
 import urllib3
 
+from paths import RESOURCE_DIR, USER_DIR
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 URL = "https://127.0.0.1:2999/liveclientdata/allgamedata"
-OUT_FILE = Path(__file__).with_name("lol_snapshots.csv")
-MODEL_FILE = Path(__file__).with_name("win_model.json")
+OUT_FILE = USER_DIR / "lol_snapshots.csv"
+MODEL_FILE = RESOURCE_DIR / "win_model.json"
 MARKS = [10, 15]  # game minutes
 POLL_SECONDS = 1
 LATE_SECONDS = 60  # skip the prediction if the snapshot was taken this long after its mark
@@ -192,6 +194,7 @@ def print_prediction(minute, blue, data, earlier=None):
 
 
 def write_rows(rows):
+    OUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     new_file = not OUT_FILE.exists()
     with OUT_FILE.open("a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDS)

@@ -1,8 +1,9 @@
 """Always-on-top, click-through win-chance overlay for a live League game.
 
-    py lol_overlay.py --rank GOLD [--x 20 --y 200]
+    py lol_overlay.py [--x 20 --y 200] [--save-data]
 
-Run it before or during a game. It reuses the polling, snapshot and model code from
+Start it once and leave it running: it sits in the system tray, picks up each game as it
+starts and goes quiet when it ends. It reuses the polling, snapshot and model code from
 lol_snapshots.py and shows the win chance as a pixel-art gem over the game instead of
 printing it. Mouse clicks pass straight through it to the game. The art and fonts live
 in assets/ (needs Pillow: py -m pip install pillow).
@@ -12,16 +13,20 @@ fullscreen.
 
 The box is hidden except for 45 seconds after the 10:00 and 15:00 reads.
 
-Hotkeys (work while the game has focus):
+Hotkeys (work while the game has focus), also in the tray menu:
     Ctrl+Alt+D  toggle drag mode (box shows and becomes clickable so you can move it)
-    Ctrl+Alt+Q  quit (saves captured rows first)
+    Ctrl+Alt+Q  quit
 
-Snapshots are still saved to lol_snapshots.csv when the game ends or you quit.
+Nothing is written about your games unless you pass --save-data, which appends the
+snapshots to lol_snapshots.csv.
 """
 
 import argparse
 import ctypes
 import json
+import os
+import queue
+import sys
 import threading
 import time
 import tkinter as tk
@@ -30,6 +35,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 
 import lol_snapshots as ls
+from paths import FROZEN, RESOURCE_DIR, USER_DIR
 from lol_itembox import ItemAdvisor, demo_rec, draw_item_box, item_size
 
 # Win32 constants
@@ -40,7 +46,7 @@ WS_EX_TOOLWINDOW = 0x80
 WS_EX_NOACTIVATE = 0x08000000
 VK_CONTROL, VK_MENU, VK_D, VK_Q = 0x11, 0x12, 0x44, 0x51
 
-ASSETS = Path(__file__).with_name("assets")
+ASSETS = RESOURCE_DIR / "assets"
 SPRITE_FILE = ASSETS / "gem.png"  # 128x64 pixel art, transparent corners
 FONT_FILE = ASSETS / "Romulus.ttf"  # 16px bitmap font; 16 and 32 are whole multiples of its grid
 SCALE = 2  # on-screen pixels per art pixel
@@ -58,6 +64,7 @@ RED_PX = {"hi": (255, 150, 135), "mid": (222, 72, 66), "lo": (150, 40, 46)}
 SHOW_SECONDS = 45  # how long the gem stays up after each read
 ITEM_SHOW_SECONDS = 45  # how long the item box stays up after it pops
 ITEM_GAP = 2  # art pixels between the gem and the item box
+SETTINGS_FILE = USER_DIR / "settings.json"  # the box position, remembered between runs
 ALPHA = 1.0  # the art is opaque; lower this to let the game show through
 
 
@@ -79,28 +86,47 @@ class State:
         self.stop = threading.Event()
 
 
-def poll(state, rank):
-    """Same loop as lol_snapshots.main(), publishing into `state` instead of printing."""
+def poll(state, rank, save_data=False):
+    """Follow game after game until asked to stop, publishing into `state`."""
     models = ls.load_models()
     print(f"Loaded models for minute(s): {sorted(models) or 'none'}")
+
+    def make_advisor():  # a fresh one per game, so nothing carries over from the last
+        try:
+            return ItemAdvisor()
+        except Exception as exc:  # the win-chance gem works without the item box
+            print(f"Item box off: {exc}")
+            return None
+
+    try:
+        while not state.stop.is_set():
+            track_game(state, rank, models, make_advisor(), save_data)
+            # The client can keep answering for a moment after the game ends; wait until
+            # it goes quiet so the finished game isn't picked up as a new one.
+            while not state.stop.is_set() and ls.fetch(quiet=True) is not None:
+                state.stop.wait(3)
+    finally:
+        with state.lock:
+            state.done = True
+
+
+def track_game(state, rank, models, advisor, save_data):
+    """One game, from first contact until it ends or the client closes."""
     match_id = time.strftime("LIVE_%Y%m%d_%H%M%S")
     pending, rows, result, all_events, earlier = list(ls.MARKS), [], None, [], None
     in_game = False
-    try:
-        advisor = ItemAdvisor()
+    with state.lock:  # a new game starts clean (the popup counters only ever go up)
+        state.blue = state.minute = state.delta = state.item = state.my_side = None
+        state.status, state.game_time = "Waiting for a live game...", None
+    if advisor:
         print(f"Item box on (builds for patch {advisor.builds['patch']}, item data {advisor.catalog.version}).")
-    except Exception as exc:  # the win-chance gem works without the item box
-        advisor = None
-        print(f"Item box off: {exc}")
     print("Waiting for a live game (start one; League must be in-game, not in lobby/loading)...")
     try:
         while not state.stop.is_set():
             data = ls.fetch(quiet=True)
             if data is None:
-                if rows:
-                    break
-                with state.lock:
-                    state.status, state.game_time = "Waiting for a live game...", None
+                if in_game:
+                    break  # the client closed: the game is over (or was abandoned)
                 state.stop.wait(5)
                 continue
             if not in_game:
@@ -157,19 +183,18 @@ def poll(state, rank):
                 break
             state.stop.wait(1)  # gold changes constantly, so keep polling at 1s all game
     finally:
-        for r in rows:
-            r["blue_win"] = result
-        if rows:
-            ls.write_rows(rows)
-            print(f"Saved {len(rows)} row(s) to {ls.OUT_FILE}")
-        else:
-            print("No snapshots captured.")
-        if all_events:
-            events_file = ls.OUT_FILE.with_name(f"{match_id}_events.json")
-            events_file.write_text(json.dumps(all_events, indent=1), encoding="utf-8")
+        if save_data:  # opt-in: the rows are for retraining the model; the events hold other players' names
+            for r in rows:
+                r["blue_win"] = result
+            if rows:
+                ls.write_rows(rows)
+                print(f"Saved {len(rows)} row(s) to {ls.OUT_FILE}")
+            if all_events:
+                events_file = ls.OUT_FILE.with_name(f"{match_id}_events.json")
+                events_file.write_text(json.dumps(all_events, indent=1), encoding="utf-8")
         with state.lock:
-            state.done = True
-            state.status = "Game over - saved" if rows else "Game over"
+            state.status = "Game over"
+        print("Game over.")
 
 
 class Overlay:
@@ -178,6 +203,8 @@ class Overlay:
         self.user32 = ctypes.windll.user32
         self.drag_mode = False
         self.hotkey_held = {"d": False, "q": False}
+        self.cmds = queue.SimpleQueue()  # "drag" / "quit" from the tray thread
+        self.tray = None
 
         root = self.root = tk.Tk()
         root.overrideredirect(True)
@@ -232,20 +259,27 @@ class Overlay:
         for name, vk in (("d", VK_D), ("q", VK_Q)):
             pressed = combo and self._down(vk)
             if pressed and not self.hotkey_held[name]:
-                if name == "d":
-                    self.drag_mode = not self.drag_mode
-                    self._set_click_through(not self.drag_mode)
-                else:
-                    self.quit()
+                self.toggle_drag() if name == "d" else self.quit()
             self.hotkey_held[name] = pressed
+
+    def toggle_drag(self):
+        self.drag_mode = not self.drag_mode
+        self._set_click_through(not self.drag_mode)
+        if not self.drag_mode:
+            save_position(self.root.winfo_x(), self.root.winfo_y())
 
     def quit(self):
         self.state.stop.set()
+        if self.tray:
+            self.tray.stop()
         self.root.after(300, self.root.destroy)
 
     # --- rendering ---------------------------------------------------------
     def _tick(self):
         self._check_hotkeys()
+        while not self.cmds.empty():
+            cmd = self.cmds.get()
+            self.toggle_drag() if cmd == "drag" else self.quit()
         with self.state.lock:
             s = self.state
             blue, minute = s.blue, s.minute
@@ -319,15 +353,49 @@ class Overlay:
         self.root.mainloop()
 
 
+def load_position():
+    try:
+        saved = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        return int(saved["x"]), int(saved["y"])
+    except (OSError, ValueError, KeyError):
+        return 20, 200
+
+
+def save_position(x, y):
+    try:
+        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        SETTINGS_FILE.write_text(json.dumps({"x": x, "y": y}), encoding="utf-8")
+    except OSError as exc:
+        print(f"Couldn't save the box position: {exc}")
+
+
+def already_running():
+    """True if another copy holds the app's mutex (so two overlays never stack up)."""
+    ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\LoLWinOverlay")
+    return ctypes.windll.kernel32.GetLastError() == 183  # ERROR_ALREADY_EXISTS
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--rank", default="", help="rank_tier label, e.g. GOLD")
-    parser.add_argument("--x", type=int, default=20)
-    parser.add_argument("--y", type=int, default=200)
+    parser.add_argument("--rank", default="", help="rank_tier label for saved rows, e.g. GOLD")
+    parser.add_argument("--x", type=int, help="box position; default is where you last left it")
+    parser.add_argument("--y", type=int)
+    parser.add_argument("--save-data", action="store_true",
+                        help="append each game's snapshots to lol_snapshots.csv (for retraining)")
+    parser.add_argument("--no-tray", action="store_true", help="no tray icon (Ctrl+Alt+Q still quits)")
     parser.add_argument("--demo", nargs="?", type=int, const=10, choices=ls.MARKS, metavar="MINUTE",
                         help="show the box now with fake data (no game needed); "
                              "--demo 10 or --demo 15 picks which read to preview")
     args = parser.parse_args()
+    if FROZEN:  # no console: keep the messages in a log file
+        USER_DIR.mkdir(parents=True, exist_ok=True)
+        sys.stdout = sys.stderr = open(USER_DIR / "overlay.log", "w", buffering=1, encoding="utf-8")
+    if not args.demo and already_running():
+        print("Already running.")
+        return
+    saved_x, saved_y = load_position()
+    x = saved_x if args.x is None else args.x
+    y = saved_y if args.y is None else args.y
 
     state = State()
     if args.demo:
@@ -341,14 +409,20 @@ def main():
               "Ctrl+Alt+Q quits.")
         worker = threading.Thread(target=lambda: None)
     else:
-        worker = threading.Thread(target=poll, args=(state, args.rank.upper()), daemon=False)
+        worker = threading.Thread(target=poll, args=(state, args.rank.upper(), args.save_data))
     worker.start()
-    overlay = Overlay(state, args.x, args.y)
+    overlay = Overlay(state, x, y)
+    if not args.no_tray:
+        try:
+            from lol_tray import start_tray
+            overlay.tray = start_tray(overlay.sprite, overlay.cmds.put)
+        except Exception as exc:  # the hotkeys still work without it
+            print(f"No tray icon: {exc!r}")
     try:
         overlay.run()
     finally:
         state.stop.set()
-        worker.join(timeout=10)  # let it save rows
+        worker.join(timeout=10)
 
 
 if __name__ == "__main__":

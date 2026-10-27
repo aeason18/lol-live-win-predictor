@@ -5,3 +5,4 @@ pillow
 numpy
 pandas
 matplotlib
+pystray

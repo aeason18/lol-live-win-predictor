@@ -14,8 +14,10 @@ from pathlib import Path
 import requests
 from PIL import Image
 
+from paths import USER_DIR
+
 DDRAGON = "https://ddragon.leagueoflegends.com"
-CACHE = Path(__file__).with_name("data") / "ddragon"
+CACHE = USER_DIR / "data" / "ddragon"
 SUMMONERS_RIFT = "11"
 LEGENDARY_MIN_GOLD = 2000  # completed items start around here; components and epics are cheaper
 BOOTS_MIN_GOLD = 900  # tier-2 boots and up; plain Boots (300g) don't count
