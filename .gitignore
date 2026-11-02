@@ -5,22 +5,23 @@ __pycache__/
 # Raw live-game events include other players' summoner names.
 LIVE_*_events.json
 
-# Your own captured games and the training data.
+# Your own captured games.
 lol_snapshots.csv
-lol_10min_all.csv
-lol_10min_silver.csv
-lol_15min_all.csv
 
-# Original sprite source; assets/gem.png is the copy the overlay uses.
-LOL UI upgrade 1.png
+# Training data and the train/test splits made from it (unknown redistribution licence).
+# The data dictionaries and the test-set fingerprint are small and fine to share.
+data/training/*
+!data/training/*dictionary.csv
+!data/training/*.sha256
+
+# Original art and mock-ups; the sprites the app uses are copied into assets/.
+design/
 
 # API key and downloaded/cached data (data/builds.json is the one output worth committing).
 .env
 data/raw/
 data/ddragon/
 
-# Original frame source; assets/item_frame.png is the copy the overlay uses.
-LOL item ui upgrade 1.png
 settings.json
 dist/
 build/

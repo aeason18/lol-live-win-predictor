@@ -4,7 +4,7 @@ Run it before or during a game (the game client must be in-game):
     python3 lol_snapshots.py --rank GOLD
 
 Writes two rows per game (minute 10 and minute 15) to lol_snapshots.csv next to
-this script, using the same columns as data/lol_10min_*.csv plus a `minute`
+this script, using the same columns as data/training/lol_10min_*.csv plus a `minute`
 column. Data comes from Riot's Live Client Data API, served locally by the game
 at https://127.0.0.1:2999.
 
@@ -12,7 +12,7 @@ Not available from the live API, so left blank: gold, xp, plates, wards.
 blue_win is filled once the game ends (blank if the script stops before then).
 
 At each snapshot it also prints each team's win chance from the models in
-win_model.json (built in lol_eda_10_vs_15.ipynb): an early read at 10 minutes and
+win_model.json (built in notebooks/lol_eda_10_vs_15.ipynb): an early read at 10 minutes and
 a firmer one at 15, along with how much it moved.
 """
 
@@ -98,7 +98,7 @@ def snapshot(data, minute, match_id, rank):
         return "red" if team == "ORDER" else "blue"
 
     # Kills, assists, first blood and towers are counted the way the 10-min dataset
-    # notebook counts them, so live rows line up with data/lol_10min_*.csv.
+    # notebook counts them, so live rows line up with data/training/lol_10min_*.csv.
     event_stat = {"DragonKill": "dragons", "HeraldKill": "heralds", "HordeKill": "voidgrubs"}
     first_blood = None
     for e in events:
