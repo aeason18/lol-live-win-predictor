@@ -40,6 +40,7 @@ class Catalog:
         self.items = {int(k): v for k, v in items.items()}
         # Live API gives display names ("Wukong"); match data gives ids ("MonkeyKing").
         self._champ_ids = {}
+        self.champ_names = {c["id"]: c["name"] for c in champions.values()}  # "MonkeyKing" -> "Wukong"
         for c in champions.values():
             self._champ_ids[_norm(c["name"])] = c["id"]
             self._champ_ids[_norm(c["id"])] = c["id"]

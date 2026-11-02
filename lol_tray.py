@@ -15,12 +15,13 @@ def _icon_image(sprite):
 
 
 def start_tray(sprite, send):
-    """Show the tray icon on its own thread. `send(cmd)` hands "drag" or "quit" to the overlay."""
+    """Show the tray icon on its own thread. `send(cmd)` hands "drag", "lookup" or "quit" to the overlay."""
     def toggle_startup(icon, item):
         lol_startup.set_enabled(not lol_startup.enabled())
 
     menu = Menu(
         MenuItem("Move the box (Ctrl+Alt+D)", lambda icon, item: send("drag")),
+        MenuItem("Champion lookup", lambda icon, item: send("lookup")),
         MenuItem("Start with Windows", toggle_startup, checked=lambda item: lol_startup.enabled()),
         MenuItem("Quit (Ctrl+Alt+Q)", lambda icon, item: send("quit")),
     )

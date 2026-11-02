@@ -35,8 +35,10 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 
 import lol_snapshots as ls
+import lol_lcu
 from paths import FROZEN, RESOURCE_DIR, USER_DIR
 from lol_itembox import ItemAdvisor, demo_rec, draw_item_box, item_size
+from lol_lookup import Lookup
 
 # Win32 constants
 GWL_EXSTYLE = -20
@@ -47,7 +49,8 @@ WS_EX_NOACTIVATE = 0x08000000
 VK_CONTROL, VK_MENU, VK_D, VK_Q = 0x11, 0x12, 0x44, 0x51
 
 ASSETS = RESOURCE_DIR / "assets"
-SPRITE_FILE = ASSETS / "gem.png"  # 128x64 pixel art, transparent corners
+SPRITE_FILE = ASSETS / "gem_clean.png"  # 128x64 pixel art, transparent corners
+SPRITE_CRACKED_FILE = ASSETS / "gem_cracked.png"  # same art with a cracked gold border: shown below 50%
 FONT_FILE = ASSETS / "Romulus.ttf"  # 16px bitmap font; 16 and 32 are whole multiples of its grid
 SCALE = 2  # on-screen pixels per art pixel
 KEY = (1, 2, 3)  # window colour that Windows renders as see-through
@@ -82,6 +85,7 @@ class State:
         self.my_side = None  # "blue" / "red" / None
         self.item = None  # lol_itembox.Rec: the next purchase, or None
         self.item_id = 0  # bumped when the item box should pop up
+        self.phase = None  # the League client's phase: 'ChampSelect', 'InProgress', ... or None
         self.done = False
         self.stop = threading.Event()
 
@@ -203,8 +207,12 @@ class Overlay:
         self.user32 = ctypes.windll.user32
         self.drag_mode = False
         self.hotkey_held = {"d": False, "q": False}
-        self.cmds = queue.SimpleQueue()  # "drag" / "quit" from the tray thread
+        self.cmds = queue.SimpleQueue()  # "drag" / "lookup" / "quit" from the tray thread
         self.tray = None
+        self.lookup = None  # the champion lookup window, while it's open
+        self.lookup_manual = False  # opened by hand, so champion select ending doesn't close it
+        self.was_champ_select = False
+        self.catalog = None
 
         root = self.root = tk.Tk()
         root.overrideredirect(True)
@@ -214,6 +222,7 @@ class Overlay:
         self.seen_read = self.seen_item = 0
         self.gem_until = self.item_until = 0.0
         self.sprite = Image.open(SPRITE_FILE).convert("RGBA")
+        self.sprite_cracked = Image.open(SPRITE_CRACKED_FILE).convert("RGBA")
         self.font_big = ImageFont.truetype(str(FONT_FILE), 32)
         self.font_small = ImageFont.truetype(str(FONT_FILE), 16)
         self.drawn = None  # what's currently on screen, so we only redraw on change
@@ -268,6 +277,49 @@ class Overlay:
         if not self.drag_mode:
             save_position(self.root.winfo_x(), self.root.winfo_y())
 
+    # --- champion lookup ----------------------------------------------------
+    def _sync_lookup(self):
+        """Open the lookup when champion select starts, close it when that phase ends."""
+        in_select = self.state.phase == "ChampSelect"
+        if in_select and not self.was_champ_select:
+            self.open_lookup()
+        elif not in_select and self.was_champ_select and not self.lookup_manual:
+            self.close_lookup()
+        self.was_champ_select = in_select
+        if self.lookup and not self.lookup.alive():
+            self.lookup = None
+
+    def open_lookup(self):
+        if self.lookup and self.lookup.alive():
+            return self.lookup.lift()
+        try:
+            from lol_itembox import BUILDS_FILE
+            builds = json.loads(BUILDS_FILE.read_text(encoding="utf-8")) if BUILDS_FILE.exists() else None
+            if self.catalog is None:
+                from lol_items import Catalog
+                self.catalog = Catalog.load()
+            saved = load_settings()
+            self.lookup = Lookup(self.root, builds, self.catalog.champ_names, self.catalog.version,
+                                 lambda x, y: save_settings(lookup_x=x, lookup_y=y))
+            if "lookup_x" in saved:
+                self.lookup.win.geometry(f"+{saved['lookup_x']}+{saved['lookup_y']}")
+        except Exception as exc:  # the lookup is a bonus; never take the overlay down with it
+            self.lookup = None
+            print(f"Champion lookup failed to open: {exc!r}")
+
+    def close_lookup(self):
+        if self.lookup:
+            self.lookup.close()
+            self.lookup = None
+
+    def toggle_lookup(self):
+        if self.lookup and self.lookup.alive():
+            self.lookup_manual = False
+            self.close_lookup()
+        else:
+            self.lookup_manual = True
+            self.open_lookup()
+
     def quit(self):
         self.state.stop.set()
         if self.tray:
@@ -279,7 +331,13 @@ class Overlay:
         self._check_hotkeys()
         while not self.cmds.empty():
             cmd = self.cmds.get()
-            self.toggle_drag() if cmd == "drag" else self.quit()
+            if cmd == "drag":
+                self.toggle_drag()
+            elif cmd == "lookup":
+                self.toggle_lookup()
+            else:
+                self.quit()
+        self._sync_lookup()
         with self.state.lock:
             s = self.state
             blue, minute = s.blue, s.minute
@@ -295,27 +353,28 @@ class Overlay:
         gem_on = self.drag_mode or now < self.gem_until
         item_on = self.drag_mode or now < self.item_until
         if blue is None:
-            main, lines, frac = "--", ("Drag", "me"), 0.5  # only visible in drag mode
+            main, lines, frac, cracked = "--", ("Drag", "me"), 0.5, False  # only visible in drag mode
         else:
             mine = blue if side != "red" else 1 - blue
             main, frac = f"{mine:.0%}", blue
+            cracked = round(mine * 100) < 50  # judged on the number shown, so "50%" is never cracked
             lines = ((side or "blue").capitalize() + (f"{delta:+.0f}" if delta is not None else ""),
                      f"{minute}:00")
-        self._draw(gem_on, item_on, main, lines, frac, item)
+        self._draw(gem_on, item_on, main, lines, frac, item, cracked)
         self.root.after(250, self._tick)
 
-    def _draw(self, gem_on, item_on, main, lines, blue_frac, item):
+    def _draw(self, gem_on, item_on, main, lines, blue_frac, item, cracked=False):
         """Render both pieces at the art's native resolution, then scale up without smoothing."""
         x0, y0, x1, y1 = BAR_BOX
         split = round((x1 - x0 - 2) * blue_frac)
-        state = (gem_on, item_on, main, lines, split, item.key() if item else None)
+        state = (gem_on, item_on, main, lines, split, item.key() if item else None, cracked)
         if self.drawn == state:
             return
         self.drawn = state
 
         canvas = Image.new("RGBA", self.canvas_size, (0, 0, 0, 0))
         if gem_on:
-            canvas.paste(self._render_gem(main, lines, split), (0, 0))
+            canvas.paste(self._render_gem(main, lines, split, cracked), (0, 0))
         if item_on:  # under the gem, flush with its left edge
             box = draw_item_box(item)
             canvas.paste(box, (0, self.sprite.height + ITEM_GAP), box)
@@ -326,9 +385,9 @@ class Overlay:
         self.photo = ImageTk.PhotoImage(flat)  # keep a reference or Tk drops it
         self.panel.config(image=self.photo)
 
-    def _render_gem(self, main, lines, split):
+    def _render_gem(self, main, lines, split, cracked=False):
         x0, y0, x1, y1 = BAR_BOX
-        art = self.sprite.copy()
+        art = (self.sprite_cracked if cracked else self.sprite).copy()
         d = ImageDraw.Draw(art)
         d.fontmode = "1"  # no anti-aliasing, so glyphs stay on the pixel grid
         texts = [(main, self.font_big, MAIN_POS)]
@@ -353,20 +412,40 @@ class Overlay:
         self.root.mainloop()
 
 
-def load_position():
+def load_settings():
     try:
-        saved = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_settings(**values):
+    """Merge `values` into settings.json (box position, lookup window position)."""
+    try:
+        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        SETTINGS_FILE.write_text(json.dumps({**load_settings(), **values}), encoding="utf-8")
+    except OSError as exc:
+        print(f"Couldn't save settings: {exc}")
+
+
+def load_position():
+    saved = load_settings()
+    try:
         return int(saved["x"]), int(saved["y"])
-    except (OSError, ValueError, KeyError):
+    except (KeyError, ValueError):
         return 20, 200
 
 
 def save_position(x, y):
-    try:
-        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        SETTINGS_FILE.write_text(json.dumps({"x": x, "y": y}), encoding="utf-8")
-    except OSError as exc:
-        print(f"Couldn't save the box position: {exc}")
+    save_settings(x=x, y=y)
+
+
+def watch_client(state):
+    """Keep state.phase up to date from the League client (champion select, lobby, in game...)."""
+    client = lol_lcu.Client()
+    while not state.stop.is_set():
+        state.phase = client.phase()
+        state.stop.wait(2)
 
 
 def already_running():
@@ -383,6 +462,8 @@ def main():
     parser.add_argument("--save-data", action="store_true",
                         help="append each game's snapshots to lol_snapshots.csv (for retraining)")
     parser.add_argument("--no-tray", action="store_true", help="no tray icon (Ctrl+Alt+Q still quits)")
+    parser.add_argument("--chance", type=float, default=0.62, help="with --demo: your team's win chance, 0-1 (below 0.5 shows the cracked gem)")
+    parser.add_argument("--lookup", action="store_true", help="open the champion lookup window right away")
     parser.add_argument("--demo", nargs="?", type=int, const=10, choices=ls.MARKS, metavar="MINUTE",
                         help="show the box now with fake data (no game needed); "
                              "--demo 10 or --demo 15 picks which read to preview")
@@ -399,7 +480,7 @@ def main():
 
     state = State()
     if args.demo:
-        state.minute, state.blue, state.my_side, state.read_id = args.demo, 0.62, "blue", 1
+        state.minute, state.blue, state.my_side, state.read_id = args.demo, args.chance, "blue", 1
         state.delta = 4.0 if args.demo == max(ls.MARKS) else None  # only the later read has a change
         try:
             state.item, state.item_id = demo_rec(), 1
@@ -411,7 +492,11 @@ def main():
     else:
         worker = threading.Thread(target=poll, args=(state, args.rank.upper(), args.save_data))
     worker.start()
+    if not args.demo:
+        threading.Thread(target=watch_client, args=(state,), daemon=True).start()
     overlay = Overlay(state, x, y)
+    if args.lookup:
+        overlay.toggle_lookup()
     if not args.no_tray:
         try:
             from lol_tray import start_tray

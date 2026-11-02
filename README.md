@@ -15,6 +15,7 @@ system tray (right-click the icon) and picks up every game you play. No terminal
 
 - Tray menu: **Move the box**, **Start with Windows**, **Quit**.
 - A small gem pops up for 45 seconds after the 10:00 and 15:00 reads, then disappears.
+- The gem's gold border is clean while your team's win chance is 50% or more, and cracked below that.
 - Clicks pass through it to the game.
 - League must be in **Borderless** or Windowed mode. Overlays can't draw over exclusive fullscreen.
 - Hotkeys: **Ctrl+Alt+D** toggles drag mode to move the box (it remembers where you leave it),
@@ -60,6 +61,17 @@ py build_data.py --region na1 --matches 3000
 It's resumable, and `--aggregate-only` rebuilds `builds.json` from games already collected.
 Re-run it after each patch. Without `data/builds.json` the overlay runs without the item box.
 
+## Champion lookup
+
+When champion select starts, a small always-on-top window opens with a champion's most-picked rune
+pages and its best and worst lane matchups, and closes when champion select ends. You can type to
+search for a champion and drag it anywhere. It reads the League client's local API to know which phase
+you're in (read-only; it never changes anything in the client), and the numbers come from `data/builds.json`.
+Matchups with few games are marked with `*`, and ones with very few aren't listed.
+
+`py lol_overlay.py --lookup` opens it right away, and `py lookup_demo.py "Lee Sin"` opens it on real
+collected data without the client running.
+
 ## Terminal version
 
 ```
@@ -70,24 +82,29 @@ Same polling and snapshots, but prints the win chance instead of showing the ove
 
 ## Files
 
-| File | What it is |
+| Path | What it is |
 |---|---|
 | `lol_overlay.py` | Always-on-top, click-through overlay (Tkinter + Pillow) |
 | `lol_tray.py`, `lol_startup.py`, `paths.py` | Tray icon, start-with-Windows switch, file locations |
 | `build_exe.ps1` | Builds the single-file `.exe` |
 | `lol_itembox.py` | Next-item suggestions, and the pixelated icon drawn inside `assets/item_frame.png` |
 | `lol_items.py` | Item recipes, costs and icons from Riot's Data Dragon; shopping logic |
+| `lol_lookup.py`, `lol_runes.py`, `lol_lcu.py` | Champion-select lookup window, rune icons, and the League client's local API |
+| `lookup_demo.py` | Opens the lookup window on collected data, no client needed |
 | `build_data.py` | Collects ranked games via Riot's API and learns builds into `data/builds.json` |
 | `lol_snapshots.py` | Polls Riot's Live Client Data API, takes snapshots, runs the model |
 | `win_model.json` | Coefficients for the 10 and 15 minute models |
-| `lol_eda_10_vs_15.ipynb` | Exploration, cross-validation and model export |
-| `assets/` | Gem sprite and font |
+| `notebooks/` | `lol_eda_10_vs_15.ipynb` (exploration, cross-validation, model export); `lol_15min_audit_and_split.ipynb` and `lol_15min_live_audit_and_split.ipynb` (data audit, cleaning, data dictionary, and a reserved test set, with all features or only the live-available ones) |
+| `data/` | `builds.json` (the learned builds); `training/` holds the training CSVs and splits (not in the repo) |
+| `assets/` | Gem sprites, item frame, lookup panel and fonts |
 
 ## Data
 
-The training CSVs (`lol_10min_all.csv`, `lol_15min_all.csv`, `lol_10min_silver.csv`) are not
-in this repo. The notebook needs them next to it to re-run. Live game data comes from Riot's
-local Live Client Data API at `https://127.0.0.1:2999`.
+The training CSVs (`lol_10min_all.csv`, `lol_15min_all.csv`, `lol_10min_silver.csv`) and the train/test
+splits made from them live in `data/training/` and are not in this repo. The notebooks read them from there.
+What is in the repo: the data dictionaries (`data/training/*dictionary.csv`) and a fingerprint of the held-out
+test matches (`lol_15min_test_HOLDOUT.sha256`), so you can check the test set was never changed. Live game
+data comes from Riot's local Live Client Data API at `https://127.0.0.1:2999`.
 
 ## Credits
 

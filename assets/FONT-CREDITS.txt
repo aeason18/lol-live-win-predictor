@@ -1,2 +1,5 @@
 Romulus.ttf - "Romulus" by Hewett Tsoi, listed as 100% Free on DaFont
 (https://www.dafont.com/romulus.font). The author asks for credit when used.
+
+Jacquard12-Regular.ttf - "Jacquard 12" by Sarah Cadigan-Fried, SIL Open Font License 1.1
+(see Jacquard12-OFL.txt). Used for the lookup window title.

@@ -1,4 +1,4 @@
-"""Learn item builds from ranked games and write data/builds.json for the overlay.
+"""Learn item builds, runes and matchups from ranked games and write data/builds.json.
 
     py build_data.py --region na1 --matches 3000
 
@@ -12,6 +12,11 @@ are already winning can afford it, so items are never compared across the whole 
 Instead each build slot (1st completed item, 2nd, ... 6th, plus boots and starting items)
 is ranked only against the other choices for that same slot, and the win rate is pulled
 toward that slot's average so a lucky handful of games can't win.
+
+The same games also give each champion and role its most-picked rune pages and a win/loss
+tally against every champion it faced in lane (for the champ-select lookup). Matchup tallies
+are raw counts; the lookup shrinks them toward the champion's overall win rate and shows how
+many games each rests on.
 """
 
 import argparse
@@ -36,6 +41,9 @@ QUEUE_RANKED_SOLO = 420
 ROLES = {"TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"}
 START_WINDOW_MS = 45_000  # items bought this soon after the game starts are "starting items"
 MIN_GAME_SECONDS = 900  # skip remakes and early surrenders
+MIN_MATCHUP_GAMES = 3  # fewer lane games than this against a champion isn't worth storing
+RUNE_PAGES = 3  # most-picked rune pages kept per champion and role
+RAW_VERSION = 2  # raw files hold runes and lane opponents too; v1 files (items only) are left alone
 
 # Ranking knobs
 MIN_GAMES = 25  # games a champion+role needs before it gets a build
@@ -72,7 +80,12 @@ class Riot:
             if wait > 0:
                 time.sleep(wait)
             self._last = time.monotonic()
-            resp = self.session.get(f"{base}{path}", params=params, timeout=30)
+            try:
+                resp = self.session.get(f"{base}{path}", params=params, timeout=30)
+            except requests.RequestException as exc:  # dropped connection, timeout: back off and retry
+                print(f"  network error ({type(exc).__name__}), retrying")
+                time.sleep(5 * (attempt + 1))
+                continue
             if resp.status_code == 200:
                 return resp.json()
             if resp.status_code == 429:
@@ -172,18 +185,39 @@ def extract_records(match, timeline, catalog):
             if s["boots"] == item:
                 s["boots"] = 0
 
+    lane = {(p["teamId"], p.get("teamPosition")): p["championName"]
+            for p in info["participants"] if p.get("championName")}
     records = []
     for p in info["participants"]:
         role = p.get("teamPosition")
         s = state[p["participantId"]]
         if role not in ROLES or not p.get("championName"):
             continue
+        other_team = 300 - p["teamId"]  # team ids are 100 and 200
         records.append({
             "champ": p["championName"], "role": role, "win": int(p["win"]), "patch": patch,
             "start": sorted(s["start"]), "legendary": s["legendary"][:BUILD_SLOTS],
             "boots": s["boots"], "boots_after": s["boots_after"],
+            "opp": lane.get((other_team, role)), "runes": _runes(p.get("perks")),
         })
     return records
+
+
+def _runes(perks):
+    """A player's rune page as {"primary", "sub", "keys": 4 primary picks, "minor": 2 secondary picks,
+    "shards": 3 stat shards}, or None if the match didn't include it."""
+    try:
+        styles = {st["description"]: st for st in perks["styles"]}
+        primary, sub = styles["primaryStyle"], styles["subStyle"]
+        shards = perks["statPerks"]
+        return {
+            "primary": primary["style"], "sub": sub["style"],
+            "keys": [x["perk"] for x in primary["selections"]],
+            "minor": [x["perk"] for x in sub["selections"]],
+            "shards": [shards["offense"], shards["flex"], shards["defense"]],
+        }
+    except (KeyError, TypeError):
+        return None
 
 
 # --- ranking ------------------------------------------------------------------
@@ -203,6 +237,34 @@ def _rank(picks):
     if not kept:  # tiny sample: fall back to what was picked most
         kept = sorted(rows, key=lambda r: -r["n"])[:1]
     return sorted(kept, key=lambda r: -r["score"])[:TOP_N]
+
+
+def _rune_pages(rs):
+    """The most-picked rune pages. A page is the trees plus the picks within them; the stat
+    shards shown are the most common ones among players with that page."""
+    pages = defaultdict(list)
+    for r in rs:
+        ru = r.get("runes")
+        if ru:
+            pages[(ru["primary"], ru["sub"], tuple(ru["keys"]), tuple(sorted(ru["minor"])))].append(r)
+    total = sum(len(v) for v in pages.values())
+    out = []
+    for (primary, sub, keys, minor), group in sorted(pages.items(), key=lambda kv: -len(kv[1]))[:RUNE_PAGES]:
+        shards = Counter(tuple(r["runes"]["shards"]) for r in group).most_common(1)[0][0]
+        out.append({"primary": primary, "sub": sub, "keys": list(keys), "minor": list(minor),
+                    "shards": list(shards), "n": len(group), "share": round(len(group) / total, 4),
+                    "wr": round(sum(r["win"] for r in group) / len(group), 4)})
+    return out
+
+
+def _matchups(rs):
+    """{opposing champion: [games, wins]} for lane matchups seen at least MIN_MATCHUP_GAMES times."""
+    n, w = Counter(), Counter()
+    for r in rs:
+        if r.get("opp"):
+            n[r["opp"]] += 1
+            w[r["opp"]] += r["win"]
+    return {c: [n[c], w[c]] for c in n if n[c] >= MIN_MATCHUP_GAMES}
 
 
 def aggregate(records):
@@ -230,6 +292,7 @@ def aggregate(records):
         champions[champ][role] = {
             "games": len(rs), "wr": round(sum(r["win"] for r in rs) / len(rs), 4),
             "start": start, "boots": boots, "slots": slots,
+            "runes": _rune_pages(rs), "vs": _matchups(rs),
         }
     return dict(champions)
 
@@ -253,7 +316,7 @@ def write_builds(records, region):
 def collect(riot, catalog, region, target, tiers, days, per_player):
     raw = DATA / "raw"
     raw.mkdir(parents=True, exist_ok=True)
-    records_file, seen_file = raw / f"records_{region}.jsonl", raw / f"seen_{region}.txt"
+    records_file, seen_file = raw / f"records{RAW_VERSION}_{region}.jsonl", raw / f"seen{RAW_VERSION}_{region}.txt"
     seen = set(seen_file.read_text().split()) if seen_file.exists() else set()
     print(f"Resuming with {len(seen)} matches already collected." if seen else "Starting fresh.")
 
@@ -283,7 +346,7 @@ def collect(riot, catalog, region, target, tiers, days, per_player):
 
 
 def load_records(region):
-    path = DATA / "raw" / f"records_{region}.jsonl"
+    path = DATA / "raw" / f"records{RAW_VERSION}_{region}.jsonl"
     if not path.exists():
         raise SystemExit(f"No collected games for {region} yet. Run without --aggregate-only first.")
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
