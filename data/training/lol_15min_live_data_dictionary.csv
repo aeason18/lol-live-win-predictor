@@ -1,0 +1,47 @@
+column,description,dtype,unit,live?,model_input,notes
+match_id,Riot match identifier (NA1_<number>),string,id,n/a,no,unique key
+rank_tier,Rank bracket the match was sampled from,ordered category,8 levels,n/a,optional,"sampled ~equal per rank, so not the natural rank mix; unknown in a live game"
+minute,Snapshot time,int,minutes,n/a,no,constant = 15
+game_start_ms,Game start,int,Unix epoch ms,n/a,no,
+patch,Game version,string,major.minor,n/a,optional,"16.18, 16.19, 16.20; kept as text"
+game_duration_s,Total length of the game,int,seconds,NO,NO,LEAKS: only known after the game; auditing only
+game_minutes,game_duration_s / 60 (added),float,minutes,NO,NO,"leaks, as above"
+player_hashes,"Anonymised ids of the 10 players, ';' separated",string,id,NO,no,used only to measure repeat players
+blue_win,TARGET: 1 if blue side won,int8,0/1,n/a,target,~49% positive
+n_champs_unique,Distinct champions in the match (added),int,count,n/a,no,always 10; consistency check
+blue_level_sum,Blue sum of the 5 champion levels,int,levels,yes,via level_sum_diff,
+blue_cs,Blue minions and monsters killed,int,count,yes,via cs_diff,live API updates in steps of 10 per player
+blue_kills,Blue champion kills,int,count,yes,via kills_diff,
+blue_assists,Blue kill assists,int,count,yes,via assists_diff,
+blue_towers,Blue towers destroyed,int,count,yes,via towers_diff,
+blue_dragons,Blue dragons taken,int,count,yes,via dragons_diff,0-2 in this data
+blue_heralds,Blue Rift Heralds taken,int,count,yes,via heralds_diff,constant 0 at 15:00
+blue_voidgrubs,Blue Void Grubs taken,int,count,yes,via voidgrubs_diff,0-3
+blue_TOP_champ,Champion played by blue top,string,~170 values,yes,optional,available live; not used by the current overlay model
+blue_JUNGLE_champ,Champion played by blue jungle,string,~170 values,yes,optional,available live; not used by the current overlay model
+blue_MIDDLE_champ,Champion played by blue middle,string,~170 values,yes,optional,available live; not used by the current overlay model
+blue_BOTTOM_champ,Champion played by blue bottom,string,~170 values,yes,optional,available live; not used by the current overlay model
+blue_UTILITY_champ,Champion played by blue utility,string,~170 values,yes,optional,available live; not used by the current overlay model
+red_level_sum,Red sum of the 5 champion levels,int,levels,yes,via level_sum_diff,
+red_cs,Red minions and monsters killed,int,count,yes,via cs_diff,live API updates in steps of 10 per player
+red_kills,Red champion kills,int,count,yes,via kills_diff,
+red_assists,Red kill assists,int,count,yes,via assists_diff,
+red_towers,Red towers destroyed,int,count,yes,via towers_diff,
+red_dragons,Red dragons taken,int,count,yes,via dragons_diff,0-2 in this data
+red_heralds,Red Rift Heralds taken,int,count,yes,via heralds_diff,constant 0 at 15:00
+red_voidgrubs,Red Void Grubs taken,int,count,yes,via voidgrubs_diff,0-3
+red_TOP_champ,Champion played by red top,string,~170 values,yes,optional,available live; not used by the current overlay model
+red_JUNGLE_champ,Champion played by red jungle,string,~170 values,yes,optional,available live; not used by the current overlay model
+red_MIDDLE_champ,Champion played by red middle,string,~170 values,yes,optional,available live; not used by the current overlay model
+red_BOTTOM_champ,Champion played by red bottom,string,~170 values,yes,optional,available live; not used by the current overlay model
+red_UTILITY_champ,Champion played by red utility,string,~170 values,yes,optional,available live; not used by the current overlay model
+blue_first_blood,1 if blue got the first kill,int8,0/1,yes,yes,
+level_sum_diff,Blue minus red sum of the 5 champion levels,int,blue - red,yes,yes,positive = blue ahead
+cs_diff,Blue minus red minions and monsters killed,int,blue - red,yes,yes,"positive = blue ahead; live value is rounded down to 10s per player, see cs_diff_live_sim"
+kills_diff,Blue minus red champion kills,int,blue - red,yes,yes,positive = blue ahead
+assists_diff,Blue minus red kill assists,int,blue - red,yes,yes,positive = blue ahead
+towers_diff,Blue minus red towers destroyed,int,blue - red,yes,yes,positive = blue ahead
+dragons_diff,Blue minus red dragons taken,int,blue - red,yes,yes,positive = blue ahead
+heralds_diff,Blue minus red Rift Heralds taken,int,blue - red,yes,no,positive = blue ahead; constant 0
+voidgrubs_diff,Blue minus red Void Grubs taken,int,blue - red,yes,yes,positive = blue ahead
+cs_diff_live_sim,cs_diff with 0-9 CS removed per player (added),int,blue - red,simulated,evaluation only,"approximates the live API's step-of-10 CS; use to test, train on exact cs_diff"

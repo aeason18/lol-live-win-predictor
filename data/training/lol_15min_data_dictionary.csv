@@ -1,0 +1,74 @@
+column,description,dtype,unit,model_input,notes
+match_id,Riot match identifier (NA1_<number>),string,id,no,unique key; ids are not in time order
+rank_tier,Rank bracket the match was sampled from,ordered category,8 levels,optional,"sampled ~equal per rank by design, so not the natural rank mix"
+minute,Snapshot time,int,minutes,no,constant = 15
+game_start_ms,Game start,int,Unix epoch ms,no,
+start_time,Game start as a timestamp (added at load),datetime,UTC,no,
+patch,Game version,string,major.minor,optional,"16.18, 16.19, 16.20; kept as text"
+game_duration_s,Total length of the game,int,seconds,NO,LEAKS: only known after the game; auditing only
+game_minutes,game_duration_s / 60 (added),float,minutes,NO,"leaks, as above"
+player_hashes,"Anonymised ids of the 10 players, ';' separated",string,id,no,used only to measure repeat players
+blue_win,TARGET: 1 if blue side won,int8,0/1,target,~49% positive
+n_champs_unique,Distinct champions in the match (added),int,count,no,always 10; consistency check
+blue_gold,Blue team total gold earned,int,gold,via gold_diff,
+blue_xp,Blue team total experience,int,xp,via xp_diff,
+blue_level_sum,Blue sum of the 5 champion levels,int,levels,via level_sum_diff,
+blue_cs,Blue minions and monsters killed,int,count,via cs_diff,
+blue_kills,Blue champion kills,int,count,via kills_diff,
+blue_assists,Blue kill assists,int,count,via assists_diff,
+blue_towers,Blue towers destroyed,int,count,via towers_diff,
+blue_plates,Blue tower plates taken,int,count,via plates_diff,
+blue_dragons,Blue dragons taken,int,count,via dragons_diff,0-2 in this data
+blue_heralds,Blue Rift Heralds taken,int,count,no,constant 0 at 15:00
+blue_voidgrubs,Blue Void Grubs taken,int,count,via voidgrubs_diff,0-3
+blue_wards,Blue wards placed,int,count,via wards_diff,weak signal; not available live
+blue_TOP_gold,Gold of the blue top player,int,gold,optional,sums to team gold
+blue_TOP_champ,Champion played by blue top,string,~170 values,optional,high-cardinality categorical
+blue_JUNGLE_gold,Gold of the blue jungle player,int,gold,optional,sums to team gold
+blue_JUNGLE_champ,Champion played by blue jungle,string,~170 values,optional,high-cardinality categorical
+blue_MIDDLE_gold,Gold of the blue middle player,int,gold,optional,sums to team gold
+blue_MIDDLE_champ,Champion played by blue middle,string,~170 values,optional,high-cardinality categorical
+blue_BOTTOM_gold,Gold of the blue bottom player,int,gold,optional,sums to team gold
+blue_BOTTOM_champ,Champion played by blue bottom,string,~170 values,optional,high-cardinality categorical
+blue_UTILITY_gold,Gold of the blue utility player,int,gold,optional,sums to team gold
+blue_UTILITY_champ,Champion played by blue utility,string,~170 values,optional,high-cardinality categorical
+red_gold,Red team total gold earned,int,gold,via gold_diff,
+red_xp,Red team total experience,int,xp,via xp_diff,
+red_level_sum,Red sum of the 5 champion levels,int,levels,via level_sum_diff,
+red_cs,Red minions and monsters killed,int,count,via cs_diff,
+red_kills,Red champion kills,int,count,via kills_diff,
+red_assists,Red kill assists,int,count,via assists_diff,
+red_towers,Red towers destroyed,int,count,via towers_diff,
+red_plates,Red tower plates taken,int,count,via plates_diff,
+red_dragons,Red dragons taken,int,count,via dragons_diff,0-2 in this data
+red_heralds,Red Rift Heralds taken,int,count,no,constant 0 at 15:00
+red_voidgrubs,Red Void Grubs taken,int,count,via voidgrubs_diff,0-3
+red_wards,Red wards placed,int,count,via wards_diff,weak signal; not available live
+red_TOP_gold,Gold of the red top player,int,gold,optional,sums to team gold
+red_TOP_champ,Champion played by red top,string,~170 values,optional,high-cardinality categorical
+red_JUNGLE_gold,Gold of the red jungle player,int,gold,optional,sums to team gold
+red_JUNGLE_champ,Champion played by red jungle,string,~170 values,optional,high-cardinality categorical
+red_MIDDLE_gold,Gold of the red middle player,int,gold,optional,sums to team gold
+red_MIDDLE_champ,Champion played by red middle,string,~170 values,optional,high-cardinality categorical
+red_BOTTOM_gold,Gold of the red bottom player,int,gold,optional,sums to team gold
+red_BOTTOM_champ,Champion played by red bottom,string,~170 values,optional,high-cardinality categorical
+red_UTILITY_gold,Gold of the red utility player,int,gold,optional,sums to team gold
+red_UTILITY_champ,Champion played by red utility,string,~170 values,optional,high-cardinality categorical
+blue_first_blood,1 if blue got the first kill,int8,0/1,yes,
+gold_diff,Blue minus red gold,int,blue - red,yes,positive = blue ahead
+xp_diff,Blue minus red experience,int,blue - red,yes,positive = blue ahead
+level_sum_diff,Blue minus red level sum,int,blue - red,yes,positive = blue ahead
+cs_diff,Blue minus red CS,int,blue - red,yes,positive = blue ahead
+kills_diff,Blue minus red kills,int,blue - red,yes,positive = blue ahead
+assists_diff,Blue minus red assists,int,blue - red,yes,positive = blue ahead
+towers_diff,Blue minus red towers,int,blue - red,yes,positive = blue ahead
+plates_diff,Blue minus red plates,int,blue - red,yes,positive = blue ahead
+dragons_diff,Blue minus red dragons,int,blue - red,yes,positive = blue ahead
+heralds_diff,Blue minus red heralds,int,blue - red,no,positive = blue ahead; constant 0
+voidgrubs_diff,Blue minus red void grubs,int,blue - red,yes,positive = blue ahead
+wards_diff,Blue minus red wards,int,blue - red,yes,positive = blue ahead
+top_gold_diff,Blue minus red gold in the top lane,int,gold,optional,lane-level lead
+jungle_gold_diff,Blue minus red gold in the jungle lane,int,gold,optional,lane-level lead
+middle_gold_diff,Blue minus red gold in the middle lane,int,gold,optional,lane-level lead
+bottom_gold_diff,Blue minus red gold in the bottom lane,int,gold,optional,lane-level lead
+utility_gold_diff,Blue minus red gold in the utility lane,int,gold,optional,lane-level lead
