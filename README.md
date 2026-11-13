@@ -94,7 +94,7 @@ Same polling and snapshots, but prints the win chance instead of showing the ove
 | `build_data.py` | Collects ranked games via Riot's API and learns builds into `data/builds.json` |
 | `lol_snapshots.py` | Polls Riot's Live Client Data API, takes snapshots, runs the model |
 | `win_model.json` | Coefficients for the 10 and 15 minute models |
-| `notebooks/` | `lol_eda_10_vs_15.ipynb` (exploration, cross-validation, model export); `lol_15min_audit_and_split.ipynb` and `lol_15min_live_audit_and_split.ipynb` (data audit, cleaning, data dictionary, and a reserved test set, with all features or only the live-available ones) |
+| `notebooks/` | `lol_eda_10_vs_15.ipynb` (exploration, cross-validation, model export); `lol_15min_audit_and_split.ipynb` and `lol_15min_live_audit_and_split.ipynb` (data audit, cleaning, data dictionary, and a reserved test set, with all features or only the live-available ones); `lol_15min_model_comparison.ipynb` (baselines vs four candidate models with shared nested cross-validation, selection, error analysis by group, and one scoring of the reserved test set) |
 | `data/` | `builds.json` (the learned builds); `training/` holds the training CSVs and splits (not in the repo) |
 | `assets/` | Gem sprites, item frame, lookup panel and fonts |
 
