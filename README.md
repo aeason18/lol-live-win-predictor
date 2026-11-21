@@ -106,6 +106,69 @@ What is in the repo: the data dictionaries (`data/training/*dictionary.csv`) and
 test matches (`lol_15min_test_HOLDOUT.sha256`), so you can check the test set was never changed. Live game
 data comes from Riot's local Live Client Data API at `https://127.0.0.1:2999`.
 
+## D4: Pipeline and API
+
+`api/` packages the D3-selected 15-minute model as a fitted scikit-learn `Pipeline` served over
+HTTP, deployed on [Modal](https://modal.com).
+
+**Why a custom transformer.** The live game (and the training CSVs) give raw per-team counts -
+`blue_level_sum`, `red_level_sum`, `blue_cs`, `red_cs`, ... and `blue_first_blood` - but the model
+was trained on *differences*: `level_sum_diff`, `cs_diff`, and so on (blue minus red). `api/transformers.py`'s
+`TeamDiffTransformer` is the pipeline step that does that conversion, so raw counts can be posted
+straight to the API without precomputing diff columns by hand. It validates that all 15 required raw
+columns are present, defaults a missing `blue_first_blood` to `0.5` (neutral - nobody has first blood
+yet, the same convention `lol_snapshots.py` uses), and implements `get_feature_names_out` so the
+pipeline stays self-describing.
+
+**Pipeline** (`api/train_pipeline.py`): `TeamDiffTransformer -> StandardScaler -> LogisticRegression(C=0.1, max_iter=2000)`,
+the exact model and hyperparameter D3 selected (`notebooks/lol_15min_model_comparison.ipynb`). It trains
+only on `data/training/lol_15min_live_train.csv` and never reads `lol_15min_live_test_HOLDOUT.csv` -
+that file is reserved for D6. 5-fold stratified cross-validation on the training file gives log loss
+~0.4976 and AUC ~0.8355, matching the notebook's reported numbers for the retrained logistic model.
+
+**Training data.** `data/training/*.csv` is gitignored (unknown redistribution licence, see "Data" above),
+so it isn't in this repo. A copy of the exact D3 training and holdout CSVs ships in `D3/D3_model_comparison.zip`;
+extract its `data/training/` folder into the repo's `data/training/` before training or running locally.
+
+**Rebuild the model bundle** (writes `api/model_bundle.joblib`: the fitted pipeline plus metadata -
+features, raw input columns, library/Python versions, row count, train date, CV metrics):
+
+```
+api\.venv\Scripts\python api\train_pipeline.py
+```
+
+**Run the API locally** (from the repo root, with `api/requirements.txt` installed into `api/.venv`):
+
+```
+api\.venv\Scripts\python -m uvicorn api.app:app --reload
+```
+
+Then open `http://127.0.0.1:8000/docs`.
+
+**Deploy to Modal:**
+
+```
+api\.venv\Scripts\python -m modal deploy api\modal_app.py
+```
+
+**Endpoints:**
+
+| Endpoint | Method | Normal | Invalid input | Model not loaded |
+|---|---|---|---|---|
+| `/` | GET | 302 to `/docs` | - | - |
+| `/health` | GET | 200 (`status`, `model_loaded`) | - | 200, `status: "degraded"` |
+| `/pipeline-info` | GET | 200 (bundle metadata + pipeline steps) | - | 503 |
+| `/predict` | POST | 200 (`blue_win_probability`, `red_win_probability`, `diff_features`) | 422 | 503 |
+
+The model loads once at startup from `api/model_bundle.joblib` (no retraining in the API process); if
+that load fails, the server keeps running and `/predict`/`/pipeline-info` answer 503 instead of crashing.
+
+**Live deployment:** https://dvnzil--lol-win-predictor-fastapi-app.us-east.modal.run
+(interactive docs: https://dvnzil--lol-win-predictor-fastapi-app.us-east.modal.run/docs)
+
+Local-vs-deployed predictions were checked on three scenarios (blue ahead, red ahead, an even game with
+no first blood yet) and matched exactly - see [`api/local_vs_deployed.md`](api/local_vs_deployed.md).
+
 ## Credits
 
 Font: Romulus by Hewett Tsoi (https://www.dafont.com/romulus.font).

@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+api/.venv/
 
 # Raw live-game events include other players' summoner names.
 LIVE_*_events.json
