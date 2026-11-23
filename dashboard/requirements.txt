@@ -1,0 +1,8 @@
+# For running the dashboard and upload script locally (Modal installs its own copy from modal_app.py).
+streamlit==1.66.1
+supabase==2.33.0
+pandas
+numpy
+altair
+# Only to deploy:
+modal
